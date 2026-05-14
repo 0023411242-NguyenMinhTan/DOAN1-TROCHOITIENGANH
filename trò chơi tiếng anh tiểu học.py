@@ -4,6 +4,7 @@ import csv
 import os
 import json
 from datetime import datetime
+import random
 import docx  # Thư viện mới để đọc file Word
 
 # ---------------------------------------------------------
@@ -78,7 +79,7 @@ class EnglishGameProWord:
             tk.Button(btn_frame, text=level, font=self.font_large, bg="#FFCA28", 
                       cursor="hand2", width=10, command=lambda l=level: self.start_game(l)).pack(side=tk.LEFT, padx=15)
             
-
+       
         teacher_frame = tk.Frame(self.root, bg=self.color_bg)
         teacher_frame.pack(side=tk.BOTTOM, pady=30)
         
@@ -192,7 +193,7 @@ class EnglishGameProWord:
                 writer.writerow([play_time, self.player_name, self.current_level, self.score])
         except Exception: pass
 
-   # ================== GIAO DIỆN QUẢN LÝ TỔNG HỢP (DÀNH CHO GIÁO VIÊN) ==================
+# ================== GIAO DIỆN QUẢN LÝ TỔNG HỢP (DÀNH CHO GIÁO VIÊN) ==================
 
     def open_teacher_dashboard(self):
         self.mgr_win = tk.Toplevel(self.root)
@@ -335,6 +336,98 @@ class EnglishGameProWord:
         self.entry_q.insert(0, q_data["q"])
         for i in range(4): self.entries_opt[i].insert(0, q_data["options"][i])
         self.entry_ans.insert(0, q_data["ans"])
+    # ================== CÁC HÀM XỬ LÝ DỮ LIỆU CÂU HỎI ==================
+
+    def import_from_word(self):
+        file_path = filedialog.askopenfilename(parent=self.mgr_win, title="Chọn file Word", filetypes=[("Word Documents", "*.docx")])
+        if not file_path: return
+        
+        # --- TÍNH NĂNG MỚI: Hỏi người dùng cách nhập dữ liệu ---
+        replace_all = messagebox.askyesno(
+            "Tùy chọn nhập dữ liệu", 
+            "Bạn có muốn XÓA SẠCH câu hỏi cũ của khối lớp trong file Word để làm mới hoàn toàn không?\n\n- Chọn 'Yes' để Thay thế hoàn toàn.\n- Chọn 'No' để Thêm nối " \
+            "tiếp vào cuối danh sách.",
+            parent=self.mgr_win
+        )
+        try:
+            doc = docx.Document(file_path)
+            current_level = None
+            q_data = {}
+            options = []
+            count = 0
+            
+            # Biến cờ để đánh dấu các khối lớp đã được xóa dữ liệu cũ (chỉ xóa 1 lần khi bắt đầu đọc lớp đó)
+            cleared_levels = set()
+            for para in doc.paragraphs:
+                text = para.text.strip()
+                if not text: continue
+                
+                # Nhận diện Lớp
+                if text in ["[Lớp 3]", "[Lớp 4]", "[Lớp 5]"]:
+                    current_level = text.strip("[]")
+                    
+                    # Nếu chọn Yes và lớp này chưa được dọn dẹp -> Xóa sạch câu hỏi cũ
+                    if replace_all and current_level not in cleared_levels:
+                        self.level_data[current_level]["questions"] = []
+                        cleared_levels.add(current_level)
+                        
+                # Nhận diện Câu hỏi 
+                elif text.lower().startswith("câu hỏi") or text.lower().startswith("câu"):
+                    if ":" in text:
+                        q_data["q"] = text.split(":", 1)[1].strip()
+                    else:
+                        q_data["q"] = text 
+                    options = [] 
+                    
+                # Nhận diện các đáp án A, B, C, D
+                elif text.upper().startswith(("A.", "B.", "C.", "D.")):
+                    options.append(text.split(".", 1)[1].strip())
+                    
+                # Nhận diện Đáp án đúng và lưu trữ
+                elif text.lower().startswith("đáp án:"):
+                    q_data["ans"] = text.split(":", 1)[1].strip()
+                    q_data["options"] = options
+                    
+                    if current_level and "q" in q_data and len(q_data["options"]) == 4 and "ans" in q_data:
+                        self.level_data[current_level]["questions"].append(q_data.copy())
+                        count += 1
+                        
+                    q_data = {} 
+                    
+            if count > 0:
+                self.save_data()
+                self.refresh_treeview_q()
+                
+                action_text = "thay thế hoàn toàn" if replace_all else "thêm nối tiếp"
+                messagebox.showinfo("Thành công", f"Đã {action_text} {count} câu hỏi từ file Word!", parent=self.mgr_win)
+            else:
+                messagebox.showwarning("Cảnh báo", "Không tìm thấy câu hỏi nào. Hãy đảm bảo format chuẩn.", parent=self.mgr_win)
+                
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không thể đọc file Word.\nChi tiết lỗi: {e}", parent=self.mgr_win)
+
+    def get_form_data(self):
+        q = self.entry_q.get().strip()
+        opts = [e.get().strip() for e in self.entries_opt]
+        ans = self.entry_ans.get().strip()
+        if not q or not all(opts) or not ans: 
+            messagebox.showwarning("Thiếu thông tin", "Vui lòng nhập đầy đủ câu hỏi và đáp án!", parent=self.mgr_win)
+            return None
+        return {"q": q, "options": opts, "ans": ans}
+
+    def add_q(self):
+        data = self.get_form_data()
+        if data:
+            self.level_data[self.combo_level.get()]["questions"].append(data)
+            self.save_data()
+            self.refresh_treeview_q() # SỬA LỖI Ở ĐÂY: Gọi hàm cập nhật Treeview mới
+            messagebox.showinfo("Thành công", "Đã thêm câu hỏi mới!", parent=self.mgr_win)
+
+    def clear_form(self):
+        self.entry_q.delete(0, tk.END)
+        self.entry_ans.delete(0, tk.END)
+        for e in self.entries_opt: 
+            e.delete(0, tk.END)    
 
     def update_q(self):
         selected = self.tree_q.selection()
@@ -348,114 +441,24 @@ class EnglishGameProWord:
 
     def delete_q(self):
         selected = self.tree_q.selection()
-        if selected and messagebox.askyesno("Xác nhận", "Xóa câu hỏi này?", parent=self.mgr_win):
-            idx = int(selected[0])
-            del self.level_data[self.combo_level.get()]["questions"][idx]
+        if not selected:
+            messagebox.showwarning("Cảnh báo", "Vui lòng chọn ít nhất một câu hỏi trên bảng để xóa!", parent=self.mgr_win)
+            return
+
+        # Báo cáo số lượng câu hỏi đang được chọn để xóa
+        msg = f"Bạn có chắc chắn muốn xóa {len(selected)} câu hỏi đã chọn không?"
+        if messagebox.askyesno("Xác nhận xóa", msg, parent=self.mgr_win):
+            
+            # Lấy danh sách ID (chỉ số) và sắp xếp GIẢM DẦN (reverse=True)
+            # Việc này rất quan trọng để khi xóa không bị lệch index của List
+            indices_to_delete = sorted([int(item) for item in selected], reverse=True)
+            
+            for idx in indices_to_delete:
+                del self.level_data[self.combo_level.get()]["questions"][idx]
+                
             self.save_data()
             self.refresh_treeview_q()
-
-    def import_from_word(self):
-        file_path = filedialog.askopenfilename(parent=self.mgr_win, title="Chọn file Word", filetypes=[("Word Documents", "*.docx")])
-        if not file_path: return
-        
-        try:
-            doc = docx.Document(file_path)
-            current_level = None
-            q_data = {}
-            options = []
-            count = 0
-            
-            for para in doc.paragraphs:
-                text = para.text.strip()
-                if not text: continue
-                
-                # Nhận diện Lớp
-                if text in ["[Lớp 3]", "[Lớp 4]", "[Lớp 5]"]:
-                    current_level = text.strip("[]")
-                    
-                # Nhận diện Câu hỏi 
-                elif text.lower().startswith("câu hỏi") or text.lower().startswith("câu"):
-                    if ":" in text:
-                        q_data["q"] = text.split(":", 1)[1].strip()
-                    else:
-                        q_data["q"] = text # Phòng hờ trường hợp gõ thiếu dấu hai chấm
-                    options = [] # Khởi tạo lại list đáp án
-                    
-                # Nhận diện các đáp án A, B, C, D
-                elif text.upper().startswith(("A.", "B.", "C.", "D.")):
-                    options.append(text.split(".", 1)[1].strip())
-                    
-                # Nhận diện Đáp án đúng và lưu trữ
-                elif text.lower().startswith("đáp án:"):
-                    q_data["ans"] = text.split(":", 1)[1].strip()
-                    q_data["options"] = options
-                    
-                    # Kiểm tra tính hợp lệ trước khi lưu
-                    if current_level and "q" in q_data and len(q_data["options"]) == 4 and "ans" in q_data:
-                        # Append bản copy để không bị ghi đè tham chiếu
-                        self.level_data[current_level]["questions"].append(q_data.copy())
-                        count += 1
-                        
-                    q_data = {} # Xóa tạm để chuẩn bị cho câu tiếp theo
-                    
-            if count > 0:
-                self.save_data()
-                self.refresh_q_list()
-                messagebox.showinfo("Thành công", f"Đã nhập thành công {count} câu hỏi từ file Word!", parent=self.mgr_win)
-            else:
-                messagebox.showwarning("Cảnh báo", "Không tìm thấy câu hỏi nào. Hãy đảm bảo format có 'Câu hỏi:', 'A.', 'B.', 'C.', 'D.' và 'Đáp án:'.", parent=self.mgr_win)
-                
-        except Exception as e:
-            messagebox.showerror("Lỗi", f"Không thể đọc file Word.\nChi tiết lỗi: {e}", parent=self.mgr_win)
-
-    def refresh_q_list(self, event=None):
-        self.listbox_q.delete(0, tk.END)
-        level = self.combo_level.get()
-        for idx, q_data in enumerate(self.level_data[level]["questions"]):
-            self.listbox_q.insert(tk.END, f"Câu {idx + 1}: {q_data['q']}")
-        self.clear_form()
-
-    def on_q_select(self, event):
-        selection = self.listbox_q.curselection()
-        if not selection: return
-        idx = selection[0]
-        level = self.combo_level.get()
-        q_data = self.level_data[level]["questions"][idx]
-        
-        self.clear_form()
-        self.entry_q.insert(0, q_data["q"])
-        for i in range(4): self.entries_opt[i].insert(0, q_data["options"][i])
-        self.entry_ans.insert(0, q_data["ans"])
-
-    def get_form_data(self):
-        q = self.entry_q.get().strip()
-        opts = [e.get().strip() for e in self.entries_opt]
-        ans = self.entry_ans.get().strip()
-        if not q or not all(opts) or not ans: return None
-        return {"q": q, "options": opts, "ans": ans}
-
-    def add_q(self):
-        data = self.get_form_data()
-        if data:
-            self.level_data[self.combo_level.get()]["questions"].append(data)
-            self.save_data(); self.refresh_q_list()
-
-    def update_q(self):
-        selection = self.listbox_q.curselection()
-        data = self.get_form_data()
-        if selection and data:
-            self.level_data[self.combo_level.get()]["questions"][selection[0]] = data
-            self.save_data(); self.refresh_q_list()
-
-    def delete_q(self):
-        selection = self.listbox_q.curselection()
-        if selection and messagebox.askyesno("Xác nhận", "Xóa câu hỏi này?", parent=self.mgr_win):
-            del self.level_data[self.combo_level.get()]["questions"][selection[0]]
-            self.save_data(); self.refresh_q_list()
-
-    def clear_form(self):
-        self.entry_q.delete(0, tk.END); self.entry_ans.delete(0, tk.END)
-        for e in self.entries_opt: e.delete(0, tk.END)
+            messagebox.showinfo("Thành công", f"Đã xóa thành công {len(selected)} câu hỏi!", parent=self.mgr_win)
 
     def clear_window(self):
         for widget in self.root.winfo_children(): widget.destroy()
@@ -464,3 +467,4 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = EnglishGameProWord(root)
     root.mainloop()
+
