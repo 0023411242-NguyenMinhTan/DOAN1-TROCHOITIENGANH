@@ -18,9 +18,9 @@ DATA_FILE = "cau_hoi_tieng_anh.json"
 STATS_FILE = "thong_ke_diem_so.csv"
 
 DEFAULT_DATA = {
-    "Lớp 3": {"time": 60, "questions": []},
-    "Lớp 4": {"time": 75, "questions": []},
-    "Lớp 5": {"time": 90, "questions": []}
+    "Lớp 3": {"time_per_q": 10, "questions": []}, # Mỗi câu 10 giây
+    "Lớp 4": {"time_per_q": 8, "questions": []},  # Mỗi câu 8 giây
+    "Lớp 5": {"time_per_q": 6, "questions": []}   # Mỗi câu 6 giây
 }
 
 class EnglishGameProWord:
@@ -55,6 +55,19 @@ class EnglishGameProWord:
         else:
             with open(DATA_FILE, "r", encoding="utf-8") as f:
                 self.level_data = json.load(f)
+            
+            
+            updated = False
+            for level in ["Lớp 3", "Lớp 4", "Lớp 5"]:
+                if level in self.level_data and "time_per_q" not in self.level_data[level]:
+                    # Phân bổ thời gian theo khối lớp nếu chưa có
+                    if level == "Lớp 3": self.level_data[level]["time_per_q"] = 10
+                    elif level == "Lớp 4": self.level_data[level]["time_per_q"] = 8
+                    else: self.level_data[level]["time_per_q"] = 6
+                    updated = True
+            
+            if updated:
+                self.save_data()
 
     def save_data(self):
         with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -85,6 +98,7 @@ class EnglishGameProWord:
         
         tk.Button(teacher_frame, text="👩‍🏫 Mở Giao Diện Quản Lý (Giáo Viên)", font=("Helvetica", 14, "bold"), 
                   bg="#FFCCBC", command=self.open_teacher_dashboard, cursor="hand2").pack(pady=10)
+        
     def start_game(self, selected_level):
         name_input = self.entry_name.get().strip()
         if not name_input:
@@ -92,7 +106,9 @@ class EnglishGameProWord:
             return
             
         self.load_data() 
-        if len(self.level_data[selected_level]["questions"]) == 0:
+        num_questions = len(self.level_data[selected_level]["questions"])
+        
+        if num_questions == 0:
             messagebox.showinfo("Thông báo", "Giáo viên chưa cập nhật câu hỏi cho khối lớp này!")
             return
 
@@ -100,7 +116,12 @@ class EnglishGameProWord:
         self.current_level = selected_level
         self.score = 0
         self.current_q_idx = 0
-        self.time_left = self.level_data[selected_level]["time"]
+        
+        # --- TÍNH TOÁN THỜI GIAN LINH HOẠT ---
+        # Lấy thời gian mỗi câu của khối lớp (mặc định 10s nếu lỗi)
+        time_per_q = self.level_data[selected_level].get("time_per_q", 10) 
+        # Tổng thời gian = Số câu hỏi * Thời gian 1 câu
+        self.time_left = num_questions * time_per_q 
         
         self.create_game_screen()
         self.load_question()
@@ -342,7 +363,7 @@ class EnglishGameProWord:
         file_path = filedialog.askopenfilename(parent=self.mgr_win, title="Chọn file Word", filetypes=[("Word Documents", "*.docx")])
         if not file_path: return
         
-        # --- TÍNH NĂNG MỚI: Hỏi người dùng cách nhập dữ liệu ---
+        # --- Hỏi người dùng cách nhập dữ liệu ---
         replace_all = messagebox.askyesno(
             "Tùy chọn nhập dữ liệu", 
             "Bạn có muốn XÓA SẠCH câu hỏi cũ của khối lớp trong file Word để làm mới hoàn toàn không?\n\n- Chọn 'Yes' để Thay thế hoàn toàn.\n- Chọn 'No' để Thêm nối " \
@@ -365,7 +386,7 @@ class EnglishGameProWord:
                 # Nhận diện Lớp
                 if text in ["[Lớp 3]", "[Lớp 4]", "[Lớp 5]"]:
                     current_level = text.strip("[]")
-                    
+
                     # Nếu chọn Yes và lớp này chưa được dọn dẹp -> Xóa sạch câu hỏi cũ
                     if replace_all and current_level not in cleared_levels:
                         self.level_data[current_level]["questions"] = []
